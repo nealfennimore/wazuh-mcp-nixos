@@ -21,8 +21,14 @@ The package build runs the 641 upstream tests. The upstream source is pinned to 
 1. Add the flake to the inputs of your NixOS flake:
 
    ```nix
-   inputs.wazuh-mcp.url = "git+file:///home/neal/Documents/wazuh-mcp";
+   inputs.wazuh-mcp = {
+     # After you push the repository, use "github:<owner>/<repo>" instead.
+     url = "git+file:///home/neal/Documents/wazuh-mcp";
+     inputs.nixpkgs.follows = "nixpkgs";
+   };
    ```
+
+   The module builds the package with the `pkgs` of your system. The `follows` line makes the flake checks use the same nixpkgs.
 
 2. Import the module and configure the service:
 
@@ -115,24 +121,22 @@ To follow GitHub releases instead of the newest commit on `main`, run `UPDATE_TR
 
 ## Continuous integration
 
-The flake has a `nixos` input that points to a local path on Neal's machine. GitHub runners cannot fetch it. `ci/nix-build` runs `nix build` with two overrides from `ci/flake-args`:
-
-- It replaces `nixos` with the stub flake in `ci/nixos-stub`. Only the devShell uses the real input.
-- It pins `nixpkgs` to the revision that `flake.lock` records for `nixos/nixpkgs`.
-
-The derivations are the same as in a local build. You can run the CI build locally: `ci/nix-build .#checks.x86_64-linux.nixos`.
+The flake has one input, `nixpkgs` (`nixos-unstable`), so CI builds the same derivations as a local build.
 
 ### Workflows
 
 | Workflow | When | What it does |
 | --- | --- | --- |
-| `.github/workflows/ci.yml` | Push to `main`, pull requests, by hand | Lints the workflows and scripts, builds both packages with their tests, and runs the VM test. |
-| `.github/workflows/update.yml` | Every day at 06:17 UTC, by hand | Runs `nix/update.sh`. If there is a new version, it builds, runs the VM test, and then opens a pull request. |
+| `.github/workflows/ci.yml` | Push to `main`, pull requests, by hand | Lints the workflows and the update script, builds both packages with their tests, and runs the VM test. |
+| `.github/workflows/update.yml`, job `upstream` | Every day at 06:17 UTC, by hand | Runs `nix/update.sh`. If there is a new upstream version, it builds, runs the VM test, and then opens a pull request on the branch `update/wazuh-mcp-server`. |
+| `.github/workflows/update.yml`, job `nixpkgs` | Every Monday at 05:43 UTC, by hand | Runs `nix flake update nixpkgs`. If the revision changed, it lints, builds, runs the VM test, and then opens a pull request on the branch `update/nixpkgs`. |
 | `.github/dependabot.yml` | Every week | Opens pull requests for new versions of the actions. |
+
+To start an update by hand, run the `Update` workflow and select `upstream` or `nixpkgs`.
 
 ### Automatic updates
 
-The update workflow opens a pull request only after the build and the VM test pass. A pull request that `GITHUB_TOKEN` opens does not start `ci.yml`, so the update workflow runs the same checks itself. Each new run replaces the open update pull request on the branch `update/wazuh-mcp-server`. If the build or the test fails, the run fails and GitHub sends a notification.
+The update jobs open a pull request only after the build and the VM test pass. A pull request that `GITHUB_TOKEN` opens does not start `ci.yml`, so the update jobs run the same checks themselves. Each job uses its own branch. A new run replaces the open pull request of the same job. If the build or the test fails, the run fails and GitHub sends a notification.
 
 To set up the repository on GitHub:
 
@@ -140,7 +144,5 @@ To set up the repository on GitHub:
 2. Go to **Settings > Actions > General > Workflow permissions**.
 3. Select **Allow GitHub Actions to create and approve pull requests**.
 4. Optional: to follow releases instead of `main`, add the repository variable `UPDATE_TRACK` with the value `release`.
-
-The workflows do not update `nixpkgs`. The `nixos` input is local, so run `nix flake update nixos` on your machine, and commit `flake.lock`. CI then uses the new `nixpkgs`.
 
 The VM test needs KVM. The local action `.github/actions/setup-nix` gives the runner user access to `/dev/kvm`. GitHub-hosted Linux runners support KVM.
