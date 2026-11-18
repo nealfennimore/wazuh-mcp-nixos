@@ -23,16 +23,14 @@ jobs:
 
       - uses: ./.github/actions/setup-nix
 
-      # The `nixos` input is a local path on Neal's machine. ci/nix-build replaces it
-      # with a stub and pins nixpkgs to the revision in flake.lock.
       - name: Lint the workflows and scripts
-        run: ci/nix-build .#checks.x86_64-linux.lint
+        run: nix build -L --no-link .#checks.x86_64-linux.lint
 
       - name: Build the packages
         run: |
-          ci/nix-build \
+          nix build -L --no-link \
             .#checks.x86_64-linux.gcf-python \
             .#checks.x86_64-linux.wazuh-mcp-server
 
       - name: Run the NixOS VM test
-        run: ci/nix-build .#checks.x86_64-linux.nixos
+        run: nix build -L --no-link .#checks.x86_64-linux.nixos

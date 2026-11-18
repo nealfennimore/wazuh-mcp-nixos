@@ -2,40 +2,18 @@
   description = "Nix package and NixOS module for Wazuh MCP Server";
 
   inputs = {
-    # The host NixOS repo. git+file only sees committed files. After a host
-    # sandbox change, run `nix flake update nixos` here.
-    nixos.url = "git+file:///home/neal/Documents/nixos";
-    # Same nixpkgs as the host sandbox, so store paths are shared.
-    nixpkgs.follows = "nixos/nixpkgs";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
   };
 
   outputs =
-    { self, nixos, nixpkgs, ... }:
+    { self, nixpkgs, ... }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
         inherit system;
-        config.allowUnfree = true;
         overlays = [ self.overlays.default ];
       };
       inherit (pkgs) lib;
-
-      # Project tools: on the shell PATH and inside the sandbox.
-      packages = [
-      ];
-
-      projectSandbox = {
-        extraPackages = packages;
-        allowedDomains = {
-          "crates.io" = "*";
-        };
-        extraEnv = {
-        };
-      };
-
-      # Module merge onto the host sandbox: lists append, attrsets merge.
-      # To replace a host value, wrap it in nixpkgs.lib.mkForce.
-      claude = nixos.packages.${system}.claude.extend projectSandbox;
     in
     {
       overlays.default = final: prev: {
@@ -65,7 +43,7 @@
         gcf-python = pkgs.python3Packages.gcf-python;
         nixos = pkgs.testers.runNixOSTest (import ./nix/tests/wazuh-mcp-server.nix { inherit self; });
 
-        # Lint the GitHub Actions workflows and the update and CI scripts.
+        # Lint the GitHub Actions workflows and the update script.
         lint =
           pkgs.runCommand "wazuh-mcp-lint"
             {
@@ -77,7 +55,6 @@
                 root = ./.;
                 fileset = lib.fileset.unions [
                   ./.github
-                  ./ci
                   ./nix/update.sh
                 ];
               };
@@ -85,7 +62,7 @@
             ''
               cd $src
               actionlint -shellcheck=${lib.getExe pkgs.shellcheck} .github/workflows/*.yml
-              shellcheck nix/update.sh ci/flake-args ci/nix-build
+              shellcheck nix/update.sh
               touch $out
             '';
       };
@@ -96,7 +73,12 @@
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = [ claude ] ++ packages;
+        packages = [
+          pkgs.actionlint
+          pkgs.jq
+          pkgs.nixfmt
+          pkgs.shellcheck
+        ];
       };
 
       formatter.${system} = pkgs.nixfmt;

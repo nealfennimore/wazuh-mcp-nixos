@@ -1,13 +1,20 @@
-name: Update upstream
+name: Update
 
 on:
   schedule:
-    # Every day at 06:17 UTC.
+    # Upstream Wazuh MCP Server: every day at 06:17 UTC.
     - cron: "17 6 * * *"
+    # nixpkgs: every Monday at 05:43 UTC.
+    - cron: "43 5 * * 1"
   workflow_dispatch:
     inputs:
+      what:
+        description: "What to update"
+        type: choice
+        options: [upstream, nixpkgs]
+        default: upstream
       track:
-        description: "What to follow: branch (newest commit on main) or release (newest GitHub release)"
+        description: "Upstream only: branch (newest commit on main) or release (newest GitHub release)"
         type: choice
         options: [branch, release]
         default: branch
@@ -16,15 +23,17 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: update-upstream
-  cancel-in-progress: false
+# A pull request that GITHUB_TOKEN opens does not start the CI workflow.
+# So each job builds and tests its update before it opens the pull request.
 
 jobs:
-  update:
+  upstream:
     name: Update Wazuh MCP Server
+    if: github.event.schedule == '17 6 * * *' || inputs.what == 'upstream'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    concurrency:
+      group: update-upstream
     steps:
       - uses: actions/checkout@v7
 
@@ -38,18 +47,16 @@ jobs:
           UPDATE_TRACK: ${{ inputs.track || vars.UPDATE_TRACK || 'branch' }}
         run: nix/update.sh
 
-      # A pull request that GITHUB_TOKEN opens does not start the CI workflow.
-      # So this job builds and tests the update before it opens the pull request.
       - name: Build the packages
         if: steps.update.outputs.updated == 'true'
         run: |
-          ci/nix-build \
+          nix build -L --no-link \
             .#checks.x86_64-linux.gcf-python \
             .#checks.x86_64-linux.wazuh-mcp-server
 
       - name: Run the NixOS VM test
         if: steps.update.outputs.updated == 'true'
-        run: ci/nix-build .#checks.x86_64-linux.nixos
+        run: nix build -L --no-link .#checks.x86_64-linux.nixos
 
       - name: Open a pull request
         if: steps.update.outputs.updated == 'true'
@@ -66,5 +73,66 @@ jobs:
             ${{ steps.update.outputs.summary }}
 
             Upstream commit: https://github.com/gensecaihq/Wazuh-MCP-Server/commit/${{ steps.update.outputs.rev }}
+
+            The workflow built the packages (with the upstream test suite) and passed the NixOS VM test before it opened this pull request.
+
+  nixpkgs:
+    name: Update nixpkgs
+    if: github.event.schedule == '43 5 * * 1' || inputs.what == 'nixpkgs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: update-nixpkgs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-nix
+
+      - name: Update flake.lock
+        id: update
+        run: |
+          old="$(jq -r .nodes.nixpkgs.locked.rev flake.lock)"
+          nix flake update nixpkgs
+          new="$(jq -r .nodes.nixpkgs.locked.rev flake.lock)"
+          if [ "$old" = "$new" ]; then
+            echo "nixpkgs is already at ${new:0:7}"
+            echo "updated=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "nixpkgs: ${old:0:7} -> ${new:0:7}"
+            {
+              echo "updated=true"
+              echo "old=$old"
+              echo "new=$new"
+            } >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Lint the workflows and scripts
+        if: steps.update.outputs.updated == 'true'
+        run: nix build -L --no-link .#checks.x86_64-linux.lint
+
+      - name: Build the packages
+        if: steps.update.outputs.updated == 'true'
+        run: |
+          nix build -L --no-link \
+            .#checks.x86_64-linux.gcf-python \
+            .#checks.x86_64-linux.wazuh-mcp-server
+
+      - name: Run the NixOS VM test
+        if: steps.update.outputs.updated == 'true'
+        run: nix build -L --no-link .#checks.x86_64-linux.nixos
+
+      - name: Open a pull request
+        if: steps.update.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: update/nixpkgs
+          delete-branch: true
+          commit-message: |
+            flake.lock: update nixpkgs
+
+            nixpkgs: ${{ steps.update.outputs.old }} -> ${{ steps.update.outputs.new }}
+          title: "flake.lock: update nixpkgs"
+          body: |
+            nixpkgs (nixos-unstable): https://github.com/NixOS/nixpkgs/compare/${{ steps.update.outputs.old }}...${{ steps.update.outputs.new }}
 
             The workflow built the packages (with the upstream test suite) and passed the NixOS VM test before it opened this pull request.

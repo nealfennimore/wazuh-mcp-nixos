@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# Run `nix build -L --no-link` with the CI input overrides from ci/flake-args.
-# Usage: ci/nix-build .#checks.x86_64-linux.nixos
-set -euo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-mapfile -t overrides < <("$here/flake-args")
-exec nix build -L --no-link "${overrides[@]}" "$@"
