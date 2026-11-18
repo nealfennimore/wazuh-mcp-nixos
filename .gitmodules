@@ -1,0 +1,3 @@
+[submodule "modules/wazuh-mcp-server"]
+	path = modules/wazuh-mcp-server
+	url = git@github.com:gensecaihq/Wazuh-MCP-Server.git
