@@ -64,6 +64,30 @@
         inherit (pkgs) wazuh-mcp-server;
         gcf-python = pkgs.python3Packages.gcf-python;
         nixos = pkgs.testers.runNixOSTest (import ./nix/tests/wazuh-mcp-server.nix { inherit self; });
+
+        # Lint the GitHub Actions workflows and the update and CI scripts.
+        lint =
+          pkgs.runCommand "wazuh-mcp-lint"
+            {
+              nativeBuildInputs = [
+                pkgs.actionlint
+                pkgs.shellcheck
+              ];
+              src = lib.fileset.toSource {
+                root = ./.;
+                fileset = lib.fileset.unions [
+                  ./.github
+                  ./ci
+                  ./nix/update.sh
+                ];
+              };
+            }
+            ''
+              cd $src
+              actionlint -shellcheck=${lib.getExe pkgs.shellcheck} .github/workflows/*.yml
+              shellcheck nix/update.sh ci/flake-args ci/nix-build
+              touch $out
+            '';
       };
 
       apps.${system}.default = {

@@ -1,0 +1,70 @@
+name: Update upstream
+
+on:
+  schedule:
+    # Every day at 06:17 UTC.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "What to follow: branch (newest commit on main) or release (newest GitHub release)"
+        type: choice
+        options: [branch, release]
+        default: branch
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-upstream
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update Wazuh MCP Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-nix
+
+      - name: Update the pinned source
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Repository variable UPDATE_TRACK sets the default for scheduled runs.
+          UPDATE_TRACK: ${{ inputs.track || vars.UPDATE_TRACK || 'branch' }}
+        run: nix/update.sh
+
+      # A pull request that GITHUB_TOKEN opens does not start the CI workflow.
+      # So this job builds and tests the update before it opens the pull request.
+      - name: Build the packages
+        if: steps.update.outputs.updated == 'true'
+        run: |
+          ci/nix-build \
+            .#checks.x86_64-linux.gcf-python \
+            .#checks.x86_64-linux.wazuh-mcp-server
+
+      - name: Run the NixOS VM test
+        if: steps.update.outputs.updated == 'true'
+        run: ci/nix-build .#checks.x86_64-linux.nixos
+
+      - name: Open a pull request
+        if: steps.update.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: update/wazuh-mcp-server
+          delete-branch: true
+          commit-message: |
+            wazuh-mcp-server: update to ${{ steps.update.outputs.version }}
+
+            ${{ steps.update.outputs.summary }}
+          title: "wazuh-mcp-server: update to ${{ steps.update.outputs.version }}"
+          body: |
+            ${{ steps.update.outputs.summary }}
+
+            Upstream commit: https://github.com/gensecaihq/Wazuh-MCP-Server/commit/${{ steps.update.outputs.rev }}
+
+            The workflow built the packages (with the upstream test suite) and passed the NixOS VM test before it opened this pull request.

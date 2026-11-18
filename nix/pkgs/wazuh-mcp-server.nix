@@ -8,7 +8,7 @@
 
 python3Packages.buildPythonApplication rec {
   pname = "wazuh-mcp-server";
-  version = "5.0.0-unstable-2026-11-18";
+  version = "5.0.0-unstable-2026-09-30";
   pyproject = true;
 
   # Keep rev equal to the modules/wazuh-mcp-server submodule commit.

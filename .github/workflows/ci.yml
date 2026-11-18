@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-nix
+
+      # The `nixos` input is a local path on Neal's machine. ci/nix-build replaces it
+      # with a stub and pins nixpkgs to the revision in flake.lock.
+      - name: Lint the workflows and scripts
+        run: ci/nix-build .#checks.x86_64-linux.lint
+
+      - name: Build the packages
+        run: |
+          ci/nix-build \
+            .#checks.x86_64-linux.gcf-python \
+            .#checks.x86_64-linux.wazuh-mcp-server
+
+      - name: Run the NixOS VM test
+        run: ci/nix-build .#checks.x86_64-linux.nixos

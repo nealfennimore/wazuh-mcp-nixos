@@ -12,6 +12,7 @@ The server is a Model Context Protocol (MCP) remote server for the Wazuh SIEM. M
 | `overlays.default` | Adds `pkgs.wazuh-mcp-server` and `python3Packages.gcf-python`. |
 | `nixosModules.default` | The `services.wazuh-mcp-server` module. |
 | `checks.x86_64-linux.nixos` | A NixOS VM test with a mock Wazuh manager. |
+| `checks.x86_64-linux.lint` | `actionlint` and `shellcheck` for the workflows and scripts. |
 
 The package build runs the 641 upstream tests. The upstream source is pinned to the commit of the `modules/wazuh-mcp-server` submodule.
 
@@ -102,7 +103,44 @@ The test checks the health, readiness, and metrics endpoints, the token exchange
 
 ## Update the upstream version
 
-1. Update the submodule: `git -C modules/wazuh-mcp-server pull`.
-2. Set `rev` in `nix/pkgs/wazuh-mcp-server.nix` to the new submodule commit, and set `version`.
-3. Get the new hash: `nix flake prefetch --json github:gensecaihq/Wazuh-MCP-Server/<rev>`. Put the `hash` value in the file.
-4. Build the package and run the VM test.
+GitHub Actions does the update automatically. See [Automatic updates](#automatic-updates).
+
+To update by hand:
+
+1. Run `nix/update.sh`. The script finds the newest upstream commit, and sets `version`, `rev` and `hash` in `nix/pkgs/wazuh-mcp-server.nix`. It also moves the submodule to the same commit. If upstream changed its `gcf-python` pin, the script updates `nix/pkgs/gcf-python.nix` too.
+2. Build the package and run the VM test.
+3. Commit the changes.
+
+To follow GitHub releases instead of the newest commit on `main`, run `UPDATE_TRACK=release nix/update.sh`.
+
+## Continuous integration
+
+The flake has a `nixos` input that points to a local path on Neal's machine. GitHub runners cannot fetch it. `ci/nix-build` runs `nix build` with two overrides from `ci/flake-args`:
+
+- It replaces `nixos` with the stub flake in `ci/nixos-stub`. Only the devShell uses the real input.
+- It pins `nixpkgs` to the revision that `flake.lock` records for `nixos/nixpkgs`.
+
+The derivations are the same as in a local build. You can run the CI build locally: `ci/nix-build .#checks.x86_64-linux.nixos`.
+
+### Workflows
+
+| Workflow | When | What it does |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | Push to `main`, pull requests, by hand | Lints the workflows and scripts, builds both packages with their tests, and runs the VM test. |
+| `.github/workflows/update.yml` | Every day at 06:17 UTC, by hand | Runs `nix/update.sh`. If there is a new version, it builds, runs the VM test, and then opens a pull request. |
+| `.github/dependabot.yml` | Every week | Opens pull requests for new versions of the actions. |
+
+### Automatic updates
+
+The update workflow opens a pull request only after the build and the VM test pass. A pull request that `GITHUB_TOKEN` opens does not start `ci.yml`, so the update workflow runs the same checks itself. Each new run replaces the open update pull request on the branch `update/wazuh-mcp-server`. If the build or the test fails, the run fails and GitHub sends a notification.
+
+To set up the repository on GitHub:
+
+1. Push this repository to GitHub.
+2. Go to **Settings > Actions > General > Workflow permissions**.
+3. Select **Allow GitHub Actions to create and approve pull requests**.
+4. Optional: to follow releases instead of `main`, add the repository variable `UPDATE_TRACK` with the value `release`.
+
+The workflows do not update `nixpkgs`. The `nixos` input is local, so run `nix flake update nixos` on your machine, and commit `flake.lock`. CI then uses the new `nixpkgs`.
+
+The VM test needs KVM. The local action `.github/actions/setup-nix` gives the runner user access to `/dev/kvm`. GitHub-hosted Linux runners support KVM.
